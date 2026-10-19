@@ -7,7 +7,7 @@
     <!--
         Letterlab — hakstrook (structureerstrook)
         Toont een woord in vakjes, één vakje per klank. De lesgever vouwt
-        letters weg, laat het woord zoemend lezen of in klanken hakken,
+        letters weg, leest zoemend mee met de wijzer, laat het woord in klanken hakken,
         en wisselt telkens één letter (raam - raak - rik - tik).
         De volledige oefening staat in de link: geen databank, geen
         account, geen bouwstap.
@@ -180,6 +180,45 @@
             transition: left 0.2s ease, opacity 0.2s;
         }
         .pointer.on { opacity: 1; }
+        /* Tijdens het zoemen volgt de wijzer de klok van het geluid. */
+        .pointer.gliding { transition: opacity 0.2s; }
+        .strip.reading .tile { background: var(--pink-soft); color: var(--pink); }
+
+        /* Lingo-bord */
+        .board { display: flex; flex-direction: column; align-items: center; gap: 0.22em; }
+        .board .strip.old { opacity: 0.45; box-shadow: none; border-color: var(--line); }
+        .board .strip.old .tile { cursor: default; }
+        .tile.hidden-letter { background: #fff; }
+        .tile.hidden-letter .ch { visibility: hidden; }
+        .tile.hidden-letter::after {
+            content: "?";
+            position: absolute;
+            inset: 0;
+            display: grid;
+            place-items: center;
+            color: var(--pink);
+            font-weight: 700;
+            border: 0.05em dashed var(--pink);
+            border-radius: 0.1em;
+            margin: 0.08em;
+        }
+        .tile.reveal .ch { animation: pop 0.45s ease; }
+        @keyframes pop { 0% { transform: scale(0.3); opacity: 0; } 70% { transform: scale(1.15); } 100% { transform: scale(1); opacity: 1; } }
+        .tile.new { background: var(--pink-soft); }
+        .tile.new .ch { color: var(--pink); }
+        .tile .badge {
+            position: absolute;
+            top: -0.42em;
+            left: 50%;
+            transform: translateX(-50%);
+            font-size: max(13px, 0.22em);
+            font-weight: 700;
+            color: #fff;
+            background: var(--pink);
+            border-radius: 999px;
+            padding: 0.1em 0.6em 0.18em;
+            white-space: nowrap;
+        }
 
         .group {
             display: flex;
@@ -343,15 +382,23 @@
         //   woordbeeld=ja           het hele woord ook boven de strook
         //   beeld=raam              afbeelding uit de centrale assets
         //   klank=nee               geen geluid (de lesgever spreekt zelf)
+        //   tempo=traag             zoemtempo: traag, standaard of snel
+        //   bord=ja                 Lingo-bord: alle woorden onder elkaar; in elk
+        //                           nieuw woord staat eerst een ? op de plaats
+        //                           van de letter die verandert
+        //   nieuw=r                 de nieuwe letter van de les (krijgt 'nieuw')
 
         const params = new URLSearchParams(location.search);
         const param = (name) => (params.get(name) || "").trim();
         const isYes = (value) => ["ja", "j", "yes", "1", "true", "waar"].includes(value.toLowerCase());
         const isNo = (value) => ["nee", "n", "no", "0", "false", "onwaar"].includes(value.toLowerCase());
 
-        // Pauze tussen de klanken bij zoemen en bij hakken (milliseconden).
-        const ZOEM_GAP_MS = 60;
+        // Hakken: pauze tussen de klanken (milliseconden).
         const HAK_GAP_MS = 650;
+        // Zoemen: de wijzer schuift aan een vast tempo onder het woord;
+        // de lesgever leest zelf zoemend mee. Seconden per vakje:
+        const ZOEM_TEMPI = { traag: 1.1, standaard: 0.8, snel: 0.55 };
+        const zoemSeconds = ZOEM_TEMPI[param("tempo").toLowerCase()] || ZOEM_TEMPI.standaard;
 
         const embedded = window.self !== window.top;
         if (embedded) document.body.classList.add("embedded");
@@ -399,6 +446,8 @@
             .map((value) => Number.parseInt(value, 10) - 1)
             .filter((value) => Number.isInteger(value) && value >= 0);
         const picture = param("beeld");
+        const board = isYes(param("bord")) && !blank;
+        const newLetter = param("nieuw").toLowerCase();
 
         const app = document.getElementById("app");
 
@@ -429,7 +478,7 @@
             app.innerHTML = `<div class="intro">
                 <h1>Letterlab hakstrook</h1>
                 <p>Een digitale structureerstrook. Het woord staat in vakjes, één vakje per klank.
-                Tik op een vakje om de letter weg te vouwen. Laat het woord zoemend lezen of in klanken hakken.</p>
+                Tik op een vakje om de letter weg te vouwen. Lees zoemend mee met de wijzer of laat het woord in klanken hakken. Als Lingo-bord: van het woord van de vorige les, letter per letter, naar het nieuwe kernwoord.</p>
 
                 <h2>Link maken</h2>
                 <div class="maker">
@@ -443,6 +492,15 @@
                     </label>
                     <label class="check"><input type="checkbox" id="m-woordbeeld"> Woord ook als geheel tonen (woordstrook boven de hakstrook)</label>
                     <label class="check"><input type="checkbox" id="m-leeg"> Blanco strook (cursisten tonen waar ze de klank horen)</label>
+                    <label class="check"><input type="checkbox" id="m-bord"> Lingo-bord: alle woorden onder elkaar, met een ? waar de letter verandert</label>
+                    <label>Nieuwe letter van de les (bij het Lingo-bord, niet verplicht)
+                        <input type="text" id="m-nieuw" value="" autocomplete="off">
+                    </label>
+                    <label>Zoemtempo
+                        <select id="m-tempo" style="font:inherit;padding:8px 10px;border:1.5px solid var(--line);border-radius:10px">
+                            <option value="">standaard</option><option value="traag">traag</option><option value="snel">snel</option>
+                        </select>
+                    </label>
                     <label class="check"><input type="checkbox" id="m-stil"> Zonder geluid (de lesgever spreekt zelf)</label>
                     <output id="m-out"></output>
                     <div class="row">
@@ -456,7 +514,8 @@
                 <table>
                     <tr><th>Knop</th><th>Toets</th><th>Wat</th></tr>
                     <tr><td>Tik op een vakje</td><td>1 tot 9</td><td>Letter weg- of terugvouwen. Bij een blanco strook: kruisje zetten of weghalen.</td></tr>
-                    <tr><td>Zoem</td><td>Z</td><td>De klanken vlot na elkaar, de wijzer volgt de leesrichting.</td></tr>
+                    <tr><td>Zoem</td><td>Z</td><td>De wijzer schuift aan een vast tempo onder het woord. Jij leest zoemend mee.</td></tr>
+                    <tr><td>Volgende (Lingo-bord)</td><td>spatie</td><td>Eerst verschijnt een ? waar de letter verandert. Nog eens: de letter verschijnt en klinkt.</td></tr>
                     <tr><td>Hak</td><td>H</td><td>De klanken één voor één, met een pauze.</td></tr>
                     <tr><td>Luidspreker</td><td>W</td><td>Het hele woord.</td></tr>
                     <tr><td>Herstel</td><td>R</td><td>Alle letters terug.</td></tr>
@@ -473,6 +532,9 @@
                 if ($("m-beeld").value.trim()) query.set("beeld", $("m-beeld").value.trim());
                 if ($("m-woordbeeld").checked) query.set("woordbeeld", "ja");
                 if ($("m-leeg").checked) query.set("leeg", "ja");
+                if ($("m-bord").checked) query.set("bord", "ja");
+                if ($("m-bord").checked && $("m-nieuw").value.trim()) query.set("nieuw", $("m-nieuw").value.trim());
+                if ($("m-tempo").value) query.set("tempo", $("m-tempo").value);
                 if ($("m-stil").checked) query.set("klank", "nee");
                 const url = `${base}?${query.toString().replace(/%7C/gi, "|").replace(/%2C/gi, ",")}`;
                 $("m-out").textContent = url;
@@ -488,6 +550,7 @@
                 if (navigator.clipboard) navigator.clipboard.writeText(text).then(done, done);
             }
             app.addEventListener("input", build);
+            app.addEventListener("change", build);
             $("m-copy").addEventListener("click", (event) => copy(build(), event.target));
             $("m-embed").addEventListener("click", (event) => copy(
                 `<iframe src="${build()}" width="100%" height="420" style="border:0;background:transparent" allowtransparency="true" allow="fullscreen" allowfullscreen title="Letterlab hakstrook"></iframe>`,
@@ -644,6 +707,7 @@
             changed: new Set(),
             active: -1,
             busy: "",          // "", "zoem", "hak" of "woord"
+            revealed: true,    // Lingo-bord: is de nieuwe letter al getoond?
             run: 0,            // teller om een lopende reeks te stoppen
         };
 
@@ -655,6 +719,16 @@
         function diff(previous, next) {
             const result = new Set();
             if (!previous) return result;
+            if (next.parts.length === previous.parts.length + 1) {
+                // Eén letter erbij: welke?
+                for (let i = 0; i < next.parts.length; i += 1) {
+                    const without = next.parts.filter((p, j) => j !== i);
+                    if (without.join("|") === previous.parts.join("|")) {
+                        result.add(i);
+                        return result;
+                    }
+                }
+            }
             if (previous.parts.length !== next.parts.length) {
                 next.parts.forEach((part, i) => {
                     if (previous.parts[i] !== part) result.add(i);
@@ -673,20 +747,35 @@
 
         const measure = document.createElement("canvas").getContext("2d");
 
+        // Vakjes van een oude rij op het Lingo-bord (niet aanklikbaar).
+        function oldRow(index) {
+            const word = words[index];
+            const changed = index > 0 ? diff(words[index - 1], word) : new Set();
+            return `<div class="strip old" aria-hidden="true">${word.parts.map((part, i) => `<span class="tile ${changed.has(i) ? "changed" : ""}">
+                <span class="ch">${escapeHtml(part)}</span></span>`).join("")}</div>`;
+        }
+
         function render() {
             const word = current();
+            const hiddenNow = board && !state.revealed ? state.changed : new Set();
+            const isLast = state.index === words.length - 1;
             const tiles = word.parts.map((part, i) => {
                 const classes = ["tile"];
                 if (blank) classes.push("blank");
                 else if (state.folded.has(i)) classes.push("folded");
                 if (state.active === i) classes.push("active");
                 if (state.changed.has(i) && !blank) classes.push("changed");
+                if (hiddenNow.has(i)) classes.push("hidden-letter");
+                if (board && state.revealed && state.justRevealed && state.changed.has(i)) classes.push("reveal");
+                const isNew = board && newLetter && part === newLetter && state.revealed && isLast;
+                if (isNew) classes.push("new");
                 const label = blank
                     ? `Vakje ${i + 1}`
                     : `${state.folded.has(i) ? "Terugvouwen" : "Wegvouwen"}: ${part}`;
                 return `<button class="${classes.join(" ")}" data-tile="${i}" aria-label="${escapeHtml(label)}">
                     <span class="ch">${escapeHtml(part)}</span>
                     ${blank && state.marks.has(i) ? `<span class="mark">×</span>` : ""}
+                    ${board && newLetter && part === newLetter && state.revealed && isLast ? `<span class="badge">nieuw</span>` : ""}
                 </button>`;
             }).join("");
 
@@ -694,8 +783,8 @@
                 <div class="stage">
                     ${picture ? `<img class="picture" id="picture" alt="" hidden>` : ""}
                     <div class="group" id="group">
-                        ${showWord && !blank ? `<div class="wordline" style="align-self:center">${escapeHtml(word.text)}</div>` : ""}
-                        <div class="strip" id="strip">${tiles}</div>
+                        ${showWord && !blank && !board ? `<div class="wordline" style="align-self:center">${escapeHtml(word.text)}</div>` : ""}
+                        ${board ? `<div class="board">${words.slice(0, state.index).map((w, i) => oldRow(i)).join("")}<div class="strip" id="strip">${tiles}</div></div>` : `<div class="strip" id="strip">${tiles}</div>`}
                         <div class="direction" aria-hidden="true">
                             <svg viewBox="0 0 100 10" preserveAspectRatio="none"><path d="M1 5H97M92 1.5L98 5L92 8.5" fill="none" stroke="currentColor" stroke-width="1.4" vector-effect="non-scaling-stroke" stroke-linecap="round" stroke-linejoin="round"/></svg>
                             <span class="pointer" id="pointer"></span>
@@ -706,10 +795,11 @@
                     ${words.length > 1 ? `
                         <button class="ctrl" data-action="prev" aria-label="Vorig woord" ${state.index > 0 ? "" : "hidden"}>${icon("prev")}</button>
                         <span class="count">${state.index + 1} / ${words.length}</span>
-                        <button class="ctrl" data-action="next" aria-label="Volgend woord" ${state.index < words.length - 1 ? "" : "hidden"}>${icon("next")}</button>
+                        <button class="ctrl" data-action="next" aria-label="Volgend woord" ${state.index < words.length - 1 || (board && !state.revealed) ? "" : "hidden"}>${icon("next")}</button>
                         <span class="sep"></span>` : ""}
+                    ${!blank ? `
+                        <button class="pill ${state.busy === "zoem" ? "busy" : ""}" data-action="zoem" title="Zoem (Z)">${icon("zoem")}<span class="txt">Zoem</span></button>` : ""}
                     ${sound && !blank ? `
-                        <button class="pill ${state.busy === "zoem" ? "busy" : ""}" data-action="zoem" title="Zoem (Z)">${icon("zoem")}<span class="txt">Zoem</span></button>
                         <button class="pill ${state.busy === "hak" ? "busy" : ""}" data-action="hak" title="Hak (H)">${icon("hak")}<span class="txt">Hak</span></button>` : ""}
                     ${sound ? `<button class="pill light ${state.busy === "woord" ? "busy" : ""}" data-action="woord" title="Woord (W)" aria-label="Woord beluisteren">${icon("speaker")}</button>` : ""}
                     <button class="ctrl" data-action="reset" aria-label="Herstel (R)" title="Herstel (R)">${icon("restart")}</button>
@@ -742,7 +832,9 @@
             const pictureHeight = pictureNode && !pictureNode.hidden ? pictureNode.getBoundingClientRect().height + 16 : 0;
             const width = stage.clientWidth - 32;
             // strook ~1.32em, pijl 0.32em, woordbeeld ~1.35em
-            const lines = 1.32 + 0.45 + (showWord && !blank ? 1.45 : 0);
+            const lines = board
+                ? words.length * 1.54 + 0.5
+                : 1.32 + 0.45 + (showWord && !blank ? 1.45 : 0);
             const height = stage.clientHeight - 32 - pictureHeight;
             const byWidth = (width / widest) * 100;
             const byHeight = height / lines;
@@ -838,6 +930,59 @@
             setBusy("");
         }
 
+
+        // ------------------------------------------------------------
+        // ZOEMEND LEZEN
+        // De wijzer schuift aan een vast tempo van het begin van het
+        // eerste vakje tot het einde van het laatste. Het vakje boven de
+        // wijzer kleurt mee. De lesgever leest zelf zoemend mee.
+        // ------------------------------------------------------------
+
+        function zoem() {
+            if (state.busy === "zoem") {
+                stopAll();
+                return;
+            }
+            stopAll();
+            const run = state.run;
+            setBusy("zoem");
+            const order = visibleIndexes();
+            if (!order.length) {
+                setBusy("");
+                return;
+            }
+            const start = performance.now() / 1000 + 0.05;
+            const end = start + order.length * zoemSeconds;
+            const pointer = document.getElementById("pointer");
+            if (pointer) pointer.classList.add("gliding", "on");
+            const tick = () => {
+                if (run !== state.run) return;
+                const now = performance.now() / 1000;
+                const strip = document.getElementById("strip");
+                const pointerNode = document.getElementById("pointer");
+                if (!strip || !pointerNode) return;
+                const stripBox = strip.getBoundingClientRect();
+                const first = strip.children[order[0]].getBoundingClientRect();
+                const last = strip.children[order[order.length - 1]].getBoundingClientRect();
+                const progress = Math.min(1, Math.max(0, (now - start) / (end - start)));
+                const x = first.left + 6 + (last.right - first.left - 12) * progress;
+                pointerNode.style.left = `${x - stripBox.left}px`;
+                [...strip.children].forEach((node) => {
+                    const box = node.getBoundingClientRect();
+                    node.classList.toggle("active", x >= box.left && x < box.right
+                        && !state.folded.has(Number(node.dataset.tile)));
+                });
+                if (now < end + 0.3) {
+                    requestAnimationFrame(tick);
+                } else {
+                    pointerNode.classList.remove("gliding");
+                    setActive(-1);
+                    setBusy("");
+                }
+            };
+            requestAnimationFrame(tick);
+        }
+
         async function playWord() {
             if (state.busy === "woord") {
                 stopAll();
@@ -858,6 +1003,10 @@
         function stopAll() {
             state.run += 1;
             stopAudio();
+            const strip = document.getElementById("strip");
+            if (strip) strip.classList.remove("reading");
+            const pointer = document.getElementById("pointer");
+            if (pointer) pointer.classList.remove("gliding");
             setActive(-1);
             setBusy("");
         }
@@ -868,6 +1017,10 @@
 
         function toggleTile(i) {
             if (i < 0 || i >= current().parts.length) return;
+            if (board && !state.revealed) {
+                reveal();
+                return;
+            }
             stopAll();
             if (blank) {
                 if (state.marks.has(i)) state.marks.delete(i);
@@ -877,8 +1030,34 @@
             } else {
                 state.folded.add(i);
             }
-            state.changed.clear();
+            if (!board) state.changed.clear();
+            state.justRevealed = false;
             render();
+        }
+
+        // Lingo-bord: de letter die verandert tonen, met haar klank.
+        function reveal() {
+            stopAll();
+            state.revealed = true;
+            state.justRevealed = true;
+            render();
+            state.justRevealed = false;
+            if (sound) {
+                const word = current();
+                const parts = [...state.changed].map((i) => word.parts[i]);
+                (async () => {
+                    for (const part of parts) {
+                        // eslint-disable-next-line no-await-in-loop
+                        await playFirst(soundUrls(part), true, part);
+                    }
+                })();
+            }
+        }
+
+        // Volgende: eerst de letter tonen, dan pas naar het volgende woord.
+        function forward() {
+            if (board && !state.revealed) reveal();
+            else go(state.index + 1);
         }
 
         let changedTimer = null;
@@ -886,12 +1065,19 @@
             if (index < 0 || index >= words.length || index === state.index) return;
             stopAll();
             const previous = current();
+            const previousIndex = state.index;
             state.index = index;
             state.folded = new Set();
             state.marks = new Set();
-            state.changed = diff(previous, current());
+            state.changed = board
+                ? (index > 0 ? diff(words[index - 1], words[index]) : new Set())
+                : diff(previous, current());
+            // Op het Lingo-bord: vooruit = eerst een vraagteken; terug = getoond.
+            state.revealed = !(board && index > previousIndex);
+            state.justRevealed = false;
             render();
             preload(current());
+            if (board) return;
             // De nieuwe letter blijft even roze, zoals de lesgever ze
             // apart benoemt voor ze aan het woord toe te voegen.
             clearTimeout(changedTimer);
@@ -923,11 +1109,11 @@
             const target = event.target.closest("[data-action]");
             if (!target) return;
             const action = target.dataset.action;
-            if (action === "zoem") sequence("zoem", ZOEM_GAP_MS);
+            if (action === "zoem") zoem();
             else if (action === "hak") sequence("hak", HAK_GAP_MS);
             else if (action === "woord") playWord();
             else if (action === "reset") reset();
-            else if (action === "next") go(state.index + 1);
+            else if (action === "next") forward();
             else if (action === "prev") go(state.index - 1);
             else if (action === "fullscreen") fullscreen();
         });
@@ -937,11 +1123,11 @@
             const key = event.key.toLowerCase();
             if (key === "arrowright" || key === " " || key === "pagedown") {
                 event.preventDefault();
-                go(state.index + 1);
+                forward();
             } else if (key === "arrowleft" || key === "pageup") {
                 event.preventDefault();
                 go(state.index - 1);
-            } else if (key === "z" && sound && !blank) sequence("zoem", ZOEM_GAP_MS);
+            } else if (key === "z" && !blank) zoem();
             else if (key === "h" && sound && !blank) sequence("hak", HAK_GAP_MS);
             else if (key === "w" && sound) playWord();
             else if (key === "r") reset();
