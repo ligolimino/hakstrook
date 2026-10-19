@@ -1,0 +1,968 @@
+<!doctype html>
+<html lang="nl">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <title>Letterlab hakstrook</title>
+    <!--
+        Letterlab — hakstrook (structureerstrook)
+        Toont een woord in vakjes, één vakje per klank. De lesgever vouwt
+        letters weg, laat het woord zoemend lezen of in klanken hakken,
+        en wisselt telkens één letter (raam - raak - rik - tik).
+        De volledige oefening staat in de link: geen databank, geen
+        account, geen bouwstap.
+        Stappenplan technisch lezen: stap 1D-F, 4, 11G en 12.
+    -->
+    <style>
+        @font-face {
+            font-family: Andika;
+            src: url("assets/fonts/andika-400.woff2") format("woff2");
+            font-weight: 400;
+            font-display: block;
+        }
+        @font-face {
+            font-family: Andika;
+            src: url("assets/fonts/andika-700.woff2") format("woff2");
+            font-weight: 700;
+            font-display: block;
+        }
+
+        /* Kleuren van Letterlab */
+        :root {
+            --ink: #0b4a5e;
+            --muted: #4f6f78;
+            --teal: #087f8c;
+            --teal-dark: #08646d;
+            --teal-soft: #d9f2f4;
+            --tile: #eef8f9;
+            --pink: #e7427a;
+            --pink-soft: #fde4ee;
+            --paper: #f7fbfb;
+            --line: #c8dfe1;
+            --good: #16805d;
+        }
+
+        * { box-sizing: border-box; }
+
+        html, body {
+            margin: 0;
+            height: 100%;
+            background: var(--paper);
+            color: var(--ink);
+            font-family: Andika, "Segoe UI", Arial, sans-serif;
+            -webkit-tap-highlight-color: transparent;
+        }
+        body.embedded { background: transparent; }
+        body.intro-page { height: auto; }
+
+        button { font: inherit; color: inherit; cursor: pointer; }
+
+        .app {
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* ---------- Podium ---------- */
+        .stage {
+            position: relative;
+            flex: 1;
+            min-height: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 2.5vmin;
+            padding: 12px;
+            user-select: none;
+            touch-action: manipulation;
+        }
+        .picture {
+            flex: 0 1 auto;
+            min-height: 0;
+            max-height: 34%;
+            max-width: 80%;
+            object-fit: contain;
+            border-radius: 14px;
+        }
+        .picture[hidden] { display: none; }
+        .wordline {
+            font-weight: 400;
+            line-height: 1.1;
+            background: #fff;
+            border: 2px solid var(--line);
+            border-radius: 0.2em;
+            padding: 0.02em 0.35em 0.1em;
+            white-space: nowrap;
+        }
+
+        /* De strook: vakjes die aan elkaar vastzitten */
+        .strip {
+            display: flex;
+            align-items: stretch;
+            background: #fff;
+            border: 3px solid var(--teal);
+            border-radius: 0.22em;
+            box-shadow: 0 10px 28px rgba(8, 127, 140, 0.16);
+            line-height: 1;
+        }
+        .tile {
+            position: relative;
+            min-width: 0.95em;
+            padding: 0.12em 0.22em 0.2em;
+            display: grid;
+            place-items: center;
+            border: 0;
+            border-right: 3px solid var(--line);
+            background: var(--tile);
+            color: var(--ink);
+            font-weight: 400;
+            transition: background 0.18s, color 0.18s, transform 0.18s;
+        }
+        .tile:first-child { border-radius: 0.17em 0 0 0.17em; }
+        .tile:last-child { border-right: 0; border-radius: 0 0.17em 0.17em 0; }
+        .tile:only-child { border-radius: 0.17em; }
+        .tile .ch { display: block; }
+
+        /* Weggevouwen: de flap ligt over de letter */
+        .tile.folded { background: var(--teal-soft); }
+        .tile.folded .ch { visibility: hidden; }
+        .tile.folded::after {
+            content: "";
+            position: absolute;
+            inset: 0.08em;
+            border-radius: 0.1em;
+            background:
+                repeating-linear-gradient(135deg,
+                    rgba(8, 127, 140, 0.20) 0 0.06em,
+                    transparent 0.06em 0.16em),
+                var(--teal-soft);
+        }
+        /* Deze klank klinkt nu (zoemen of hakken) */
+        .tile.active {
+            background: var(--pink-soft);
+            color: var(--pink);
+        }
+        /* Nieuwe letter na een wissel */
+        .tile.changed { background: var(--pink-soft); }
+        .tile.changed .ch { color: var(--pink); }
+        /* Blanco strook: een kruisje waar je de klank hoort */
+        /* Alle blanco vakjes even breed: de breedte verraadt niets. */
+        .tile.blank { width: 1.25em; }
+        .tile.blank .ch { visibility: hidden; }
+        .tile .mark {
+            position: absolute;
+            inset: 0;
+            display: grid;
+            place-items: center;
+            color: var(--pink);
+            font-weight: 700;
+        }
+
+        /* Leesrichting: pijl onder de strook met een wijzer */
+        .direction {
+            position: relative;
+            height: 0.32em;
+            display: flex;
+            align-items: center;
+            color: var(--line);
+        }
+        .direction svg { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+        .pointer {
+            position: absolute;
+            top: 0.07em;
+            width: 0.18em;
+            height: 0.18em;
+            margin-left: -0.09em;
+            border-radius: 50%;
+            background: var(--pink);
+            opacity: 0;
+            transition: left 0.2s ease, opacity 0.2s;
+        }
+        .pointer.on { opacity: 1; }
+
+        .group {
+            display: flex;
+            flex-direction: column;
+            align-items: stretch;
+            gap: 0.12em;
+        }
+
+        /* ---------- Bedieningsbalk ---------- */
+        .bar {
+            flex: none;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-wrap: wrap;
+            gap: 8px;
+            padding: 6px 10px calc(8px + env(safe-area-inset-bottom));
+        }
+        .ctrl {
+            width: 46px;
+            height: 46px;
+            border-radius: 50%;
+            border: 1.5px solid var(--line);
+            background: #fff;
+            display: grid;
+            place-items: center;
+            color: var(--teal-dark);
+            flex: none;
+        }
+        .ctrl svg { width: 24px; height: 24px; }
+        .ctrl:hover { border-color: var(--teal); }
+        .ctrl[hidden] { display: none; }
+        .pill {
+            height: 46px;
+            border-radius: 999px;
+            border: 1.5px solid var(--teal);
+            background: var(--teal);
+            color: #fff;
+            padding: 0 16px;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            font-weight: 700;
+            font-size: 17px;
+            flex: none;
+        }
+        .pill.light {
+            background: #fff;
+            color: var(--teal-dark);
+            border-color: var(--line);
+        }
+        .pill svg { width: 22px; height: 22px; }
+        .pill.busy { background: var(--pink); border-color: var(--pink); color: #fff; }
+        .pill[hidden] { display: none; }
+        .count {
+            min-width: 50px;
+            text-align: center;
+            color: var(--muted);
+            font-size: 16px;
+            font-variant-numeric: tabular-nums;
+        }
+        .sep { width: 6px; }
+
+        @media (max-width: 560px) {
+            .pill .txt { display: none; }
+            .pill { padding: 0 12px; }
+            .bar { gap: 6px; }
+            .sep { display: none; }
+        }
+        @media (max-height: 320px) {
+            .ctrl { width: 36px; height: 36px; }
+            .ctrl svg { width: 20px; height: 20px; }
+            .pill { height: 36px; font-size: 14px; padding: 0 10px; }
+            .pill svg { width: 18px; height: 18px; }
+            .bar { padding-top: 2px; padding-bottom: 4px; }
+        }
+
+        /* ---------- Uitlegpagina zonder oefening ---------- */
+        .intro {
+            max-width: 680px;
+            margin: 0 auto;
+            padding: 32px 20px 48px;
+            line-height: 1.5;
+            font-size: 18px;
+        }
+        .intro h1 { color: var(--teal-dark); margin-bottom: 4px; }
+        .intro h2 { color: var(--teal-dark); font-size: 21px; margin-top: 30px; }
+        .intro code {
+            background: var(--teal-soft);
+            padding: 2px 6px;
+            border-radius: 6px;
+            word-break: break-all;
+        }
+        .intro a { color: var(--teal-dark); }
+        .intro table { border-collapse: collapse; width: 100%; font-size: 16px; }
+        .intro td, .intro th { border-bottom: 1px solid var(--line); padding: 6px 8px; text-align: left; vertical-align: top; }
+        .maker {
+            background: #fff;
+            border: 1.5px solid var(--line);
+            border-radius: 16px;
+            padding: 16px;
+            display: grid;
+            gap: 12px;
+        }
+        .maker label { font-weight: 700; display: grid; gap: 4px; }
+        .maker label small { font-weight: 400; color: var(--muted); }
+        .maker input[type=text] {
+            font: inherit;
+            padding: 8px 10px;
+            border: 1.5px solid var(--line);
+            border-radius: 10px;
+            color: var(--ink);
+        }
+        .maker .check { font-weight: 400; display: flex; gap: 8px; align-items: center; }
+        .maker output {
+            display: block;
+            background: var(--teal-soft);
+            border-radius: 10px;
+            padding: 8px 10px;
+            font-size: 15px;
+            word-break: break-all;
+        }
+        .maker .row { display: flex; gap: 8px; flex-wrap: wrap; }
+        .maker .row button, .maker .row a {
+            border: 0;
+            border-radius: 999px;
+            background: var(--teal);
+            color: #fff;
+            padding: 8px 16px;
+            font-weight: 700;
+            text-decoration: none;
+            font-size: 16px;
+        }
+    </style>
+</head>
+<body>
+    <div class="app" id="app"></div>
+
+    <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+        <symbol id="i-next" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/></symbol>
+        <symbol id="i-prev" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" d="M15 5l-7 7 7 7"/></symbol>
+        <symbol id="i-restart" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" d="M4 12a8 8 0 1 0 2.4-5.7M4 4v4.5h4.5"/></symbol>
+        <symbol id="i-full" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></symbol>
+        <symbol id="i-speaker" viewBox="0 0 24 24"><path fill="currentColor" d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z"/><path fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" d="M15.5 9a4.2 4.2 0 0 1 0 6M18 6.5a7.8 7.8 0 0 1 0 11"/></symbol>
+        <symbol id="i-zoem" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" d="M3 12c2-3 3-3 4.5 0s2.5 3 4.5 0 3-3 4.5 0M16 8l4 4-4 4"/></symbol>
+        <symbol id="i-hak" viewBox="0 0 24 24"><g fill="currentColor"><circle cx="5" cy="12" r="2.4"/><circle cx="12" cy="12" r="2.4"/><circle cx="19" cy="12" r="2.4"/></g></symbol>
+    </svg>
+
+    <script>
+    (() => {
+        "use strict";
+
+        // ============================================================
+        // 1. INSTELLINGEN UIT DE LINK
+        // ============================================================
+        //   woord=raam              het woord (verplicht)
+        //   woord=raam|raak|rik     een wisselrijtje: telkens één woord verder
+        //   woord=r-aa-m            zelf de vakjes bepalen met streepjes
+        //   leeg=ja                 blanco strook: tik waar je de klank hoort
+        //   weg=1,3                 deze vakjes staan bij het begin weggevouwen
+        //   woordbeeld=ja           het hele woord ook boven de strook
+        //   beeld=raam              afbeelding uit de centrale assets
+        //   klank=nee               geen geluid (de lesgever spreekt zelf)
+
+        const params = new URLSearchParams(location.search);
+        const param = (name) => (params.get(name) || "").trim();
+        const isYes = (value) => ["ja", "j", "yes", "1", "true", "waar"].includes(value.toLowerCase());
+        const isNo = (value) => ["nee", "n", "no", "0", "false", "onwaar"].includes(value.toLowerCase());
+
+        // Pauze tussen de klanken bij zoemen en bij hakken (milliseconden).
+        const ZOEM_GAP_MS = 60;
+        const HAK_GAP_MS = 650;
+
+        const embedded = window.self !== window.top;
+        if (embedded) document.body.classList.add("embedded");
+
+        // Opnames uit de centrale repository assets. De mappen van het
+        // klik-klakboekje blijven als tweede kans bestaan.
+        const SOUND_FOLDERS = ["../assets/audio/klanken/", "../klikklak/assets/audio/klanken/"];
+        const WORD_FOLDERS = ["../assets/audio/woorden/", "../klikklak/assets/audio/woorden/"];
+        const IMAGE_FOLDERS = ["../assets/afbeeldingen/"];
+        const RESERVED_NAMES = ["con", "prn", "aux", "nul"];
+
+        // Dezelfde klankgroepen als in het dictee en de createpagina.
+        const COMPOUNDS = ["sch", "oe", "aa", "ee", "oo", "uu", "ie", "ei", "ij",
+            "ui", "eu", "ou", "au", "ng", "ch"].sort((a, b) => b.length - a.length);
+
+        // Een woord in klanken: 'raam' wordt r | aa | m. Met streepjes
+        // bepaal je het zelf: 'ba-n-k' of 'b-a-nk'.
+        function tokenize(word) {
+            const clean = word.toLowerCase().trim();
+            if (/[-·.]/.test(clean)) {
+                return clean.split(/[-·.]/).map((part) => part.trim()).filter(Boolean);
+            }
+            const letters = clean.replace(/[^a-zà-ÿ0-9]/g, "");
+            const out = [];
+            let i = 0;
+            while (i < letters.length) {
+                const found = COMPOUNDS.find((compound) => letters.startsWith(compound, i));
+                out.push(found || letters[i]);
+                i += (found || letters[i]).length;
+            }
+            return out;
+        }
+
+        const words = param("woord")
+            .split("|")
+            .map((word) => word.trim())
+            .filter(Boolean)
+            .map((word) => ({ text: tokenize(word).join(""), parts: tokenize(word) }))
+            .filter((word) => word.parts.length);
+        const blank = isYes(param("leeg"));
+        const showWord = isYes(param("woordbeeld"));
+        const sound = !isNo(param("klank"));
+        const startFolded = param("weg")
+            .split(",")
+            .map((value) => Number.parseInt(value, 10) - 1)
+            .filter((value) => Number.isInteger(value) && value >= 0);
+        const picture = param("beeld");
+
+        const app = document.getElementById("app");
+
+        function icon(name) {
+            return `<svg aria-hidden="true"><use href="#i-${name}"></use></svg>`;
+        }
+
+        function escapeHtml(value) {
+            return String(value)
+                .replace(/&/g, "&amp;")
+                .replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;")
+                .replace(/"/g, "&quot;");
+        }
+
+        // ============================================================
+        // 2. GEEN OEFENING: UITLEG EN LINK MAKEN
+        // ============================================================
+
+        if (!words.length) {
+            showIntro();
+            return;
+        }
+
+        function showIntro() {
+            document.title = "Letterlab hakstrook";
+            document.body.classList.add("intro-page");
+            app.innerHTML = `<div class="intro">
+                <h1>Letterlab hakstrook</h1>
+                <p>Een digitale structureerstrook. Het woord staat in vakjes, één vakje per klank.
+                Tik op een vakje om de letter weg te vouwen. Laat het woord zoemend lezen of in klanken hakken.</p>
+
+                <h2>Link maken</h2>
+                <div class="maker">
+                    <label>Woord of wisselrijtje
+                        <small>Eén woord, of meerdere woorden met een | ertussen: raam|raak|rik|tik</small>
+                        <input type="text" id="m-woord" value="raam" autocomplete="off">
+                    </label>
+                    <label>Afbeelding (niet verplicht)
+                        <small>Naam uit de map afbeeldingen van assets, zonder extensie</small>
+                        <input type="text" id="m-beeld" value="" autocomplete="off">
+                    </label>
+                    <label class="check"><input type="checkbox" id="m-woordbeeld"> Woord ook als geheel tonen (woordstrook boven de hakstrook)</label>
+                    <label class="check"><input type="checkbox" id="m-leeg"> Blanco strook (cursisten tonen waar ze de klank horen)</label>
+                    <label class="check"><input type="checkbox" id="m-stil"> Zonder geluid (de lesgever spreekt zelf)</label>
+                    <output id="m-out"></output>
+                    <div class="row">
+                        <a id="m-open" href="#" target="_blank" rel="noopener">Openen</a>
+                        <button type="button" id="m-copy">Link kopiëren</button>
+                        <button type="button" id="m-embed">Genially-code kopiëren</button>
+                    </div>
+                </div>
+
+                <h2>Bediening</h2>
+                <table>
+                    <tr><th>Knop</th><th>Toets</th><th>Wat</th></tr>
+                    <tr><td>Tik op een vakje</td><td>1 tot 9</td><td>Letter weg- of terugvouwen. Bij een blanco strook: kruisje zetten of weghalen.</td></tr>
+                    <tr><td>Zoem</td><td>Z</td><td>De klanken vlot na elkaar, de wijzer volgt de leesrichting.</td></tr>
+                    <tr><td>Hak</td><td>H</td><td>De klanken één voor één, met een pauze.</td></tr>
+                    <tr><td>Luidspreker</td><td>W</td><td>Het hele woord.</td></tr>
+                    <tr><td>Herstel</td><td>R</td><td>Alle letters terug.</td></tr>
+                    <tr><td>Pijlen</td><td>pijl links en rechts</td><td>Vorig of volgend woord in het wisselrijtje. De nieuwe letter kleurt even roze.</td></tr>
+                    <tr><td>Volledig scherm</td><td>F</td><td></td></tr>
+                </table>
+            </div>`;
+
+            const $ = (id) => document.getElementById(id);
+            const base = location.href.split("?")[0].split("#")[0];
+            function build() {
+                const query = new URLSearchParams();
+                query.set("woord", $("m-woord").value.trim().replace(/\s*\|\s*/g, "|"));
+                if ($("m-beeld").value.trim()) query.set("beeld", $("m-beeld").value.trim());
+                if ($("m-woordbeeld").checked) query.set("woordbeeld", "ja");
+                if ($("m-leeg").checked) query.set("leeg", "ja");
+                if ($("m-stil").checked) query.set("klank", "nee");
+                const url = `${base}?${query.toString().replace(/%7C/gi, "|").replace(/%2C/gi, ",")}`;
+                $("m-out").textContent = url;
+                $("m-open").href = url;
+                return url;
+            }
+            function copy(text, button) {
+                const done = () => {
+                    const old = button.textContent;
+                    button.textContent = "Gekopieerd";
+                    setTimeout(() => { button.textContent = old; }, 1400);
+                };
+                if (navigator.clipboard) navigator.clipboard.writeText(text).then(done, done);
+            }
+            app.addEventListener("input", build);
+            $("m-copy").addEventListener("click", (event) => copy(build(), event.target));
+            $("m-embed").addEventListener("click", (event) => copy(
+                `<iframe src="${build()}" width="100%" height="420" style="border:0;background:transparent" allowtransparency="true" allow="fullscreen" allowfullscreen title="Letterlab hakstrook"></iframe>`,
+                event.target));
+            build();
+        }
+
+        // ============================================================
+        // 3. AUDIO
+        // ============================================================
+        // Klanken worden zonder de stilte vooraan en achteraan afgespeeld,
+        // zodat zoemen echt vlot klinkt. Lukt dat niet, dan gewoon met
+        // een audio-element. Geen opname: de browserstem.
+
+        const KNOWN_SOUNDS = new Set(["a", "aa", "b", "d", "e", "ee", "eu", "f",
+            "g", "h", "i", "ie", "ij", "ei", "j", "k", "l", "m", "n", "ng", "nk",
+            "o", "oe", "oo", "ou", "p", "r", "s", "sch", "sl", "sp", "st", "t",
+            "u", "ui", "uu", "v", "w", "z"]);
+
+        function soundUrls(part) {
+            const lower = part.toLowerCase();
+            if (!KNOWN_SOUNDS.has(lower)) return [];
+            const file = lower === "ij" || lower === "ei" ? "ij-ei" : lower;
+            return SOUND_FOLDERS.map((folder) => `${folder}${encodeURIComponent(file)}.mp3`);
+        }
+
+        function wordUrls(word) {
+            const lower = word.toLowerCase();
+            const name = RESERVED_NAMES.includes(lower) ? `${lower}_` : lower;
+            const file = `${encodeURIComponent(name)}.mp3`;
+            return WORD_FOLDERS.flatMap((folder) => [
+                `${folder}${encodeURIComponent(lower.charAt(0))}/${file}`,
+                `${folder}nonsens/${file}`,
+            ]);
+        }
+
+        let audioContext = null;
+        const bufferCache = new Map();   // url -> AudioBuffer of null (bestaat niet)
+
+        function context() {
+            if (!audioContext) {
+                const Ctx = window.AudioContext || window.webkitAudioContext;
+                if (Ctx) audioContext = new Ctx();
+            }
+            if (audioContext && audioContext.state === "suspended") audioContext.resume();
+            return audioContext;
+        }
+
+        async function loadBuffer(url) {
+            if (bufferCache.has(url)) return bufferCache.get(url);
+            const ctx = context();
+            let buffer = null;
+            try {
+                const response = await fetch(url);
+                if (response.ok && ctx) {
+                    const data = await response.arrayBuffer();
+                    buffer = await new Promise((resolve, reject) => {
+                        ctx.decodeAudioData(data, resolve, reject);
+                    });
+                }
+            } catch (error) {
+                buffer = null;
+            }
+            bufferCache.set(url, buffer);
+            return buffer;
+        }
+
+        // Zoekt waar het geluid begint en stopt (zonder stilte).
+        function trimRange(buffer) {
+            const data = buffer.getChannelData(0);
+            const threshold = 0.02;
+            let start = 0;
+            let end = data.length - 1;
+            while (start < end && Math.abs(data[start]) < threshold) start += 1;
+            while (end > start && Math.abs(data[end]) < threshold) end -= 1;
+            const pad = Math.floor(buffer.sampleRate * 0.02);
+            start = Math.max(0, start - pad);
+            end = Math.min(data.length - 1, end + pad);
+            return { offset: start / buffer.sampleRate, duration: (end - start) / buffer.sampleRate };
+        }
+
+        function playBuffer(buffer, trim) {
+            return new Promise((resolve) => {
+                const ctx = context();
+                const source = ctx.createBufferSource();
+                source.buffer = buffer;
+                source.connect(ctx.destination);
+                source.onended = resolve;
+                if (trim) {
+                    const range = trimRange(buffer);
+                    source.start(0, range.offset, range.duration);
+                } else {
+                    source.start(0);
+                }
+                currentSources.add(source);
+                source.addEventListener("ended", () => currentSources.delete(source));
+            });
+        }
+        const currentSources = new Set();
+
+        async function playFirst(urls, trim, fallbackText) {
+            for (const url of urls) {
+                // eslint-disable-next-line no-await-in-loop
+                const buffer = await loadBuffer(url);
+                if (buffer) return playBuffer(buffer, trim);
+            }
+            return speak(fallbackText);
+        }
+
+        function speak(text) {
+            return new Promise((resolve) => {
+                if (!("speechSynthesis" in window) || !text) {
+                    resolve();
+                    return;
+                }
+                const utterance = new SpeechSynthesisUtterance(text);
+                const voices = speechSynthesis.getVoices();
+                utterance.voice = voices.find((v) => v.lang === "nl-BE")
+                    || voices.find((v) => v.lang.startsWith("nl")) || null;
+                utterance.lang = utterance.voice ? utterance.voice.lang : "nl-BE";
+                utterance.rate = 0.8;
+                utterance.onend = resolve;
+                utterance.onerror = resolve;
+                setTimeout(resolve, 3500);
+                speechSynthesis.speak(utterance);
+            });
+        }
+
+        function stopAudio() {
+            currentSources.forEach((source) => {
+                try { source.stop(); } catch (error) { /* al gestopt */ }
+            });
+            currentSources.clear();
+            if ("speechSynthesis" in window) speechSynthesis.cancel();
+        }
+
+        const wait = (ms) => new Promise((resolve) => { setTimeout(resolve, ms); });
+
+        // Vooraf laden, zodat de eerste klank meteen klinkt.
+        function preload(word) {
+            if (!sound) return;
+            word.parts.forEach((part) => soundUrls(part).slice(0, 1).forEach(loadBuffer));
+            wordUrls(word.text).slice(0, 2).forEach(loadBuffer);
+        }
+
+        // ============================================================
+        // 4. TOESTAND
+        // ============================================================
+
+        const state = {
+            index: 0,
+            folded: new Set(startFolded),
+            marks: new Set(),
+            changed: new Set(),
+            active: -1,
+            busy: "",          // "", "zoem", "hak" of "woord"
+            run: 0,            // teller om een lopende reeks te stoppen
+        };
+
+        function current() {
+            return words[state.index];
+        }
+
+        // Welke vakjes zijn anders dan in het vorige woord?
+        function diff(previous, next) {
+            const result = new Set();
+            if (!previous) return result;
+            if (previous.parts.length !== next.parts.length) {
+                next.parts.forEach((part, i) => {
+                    if (previous.parts[i] !== part) result.add(i);
+                });
+                return result;
+            }
+            next.parts.forEach((part, i) => {
+                if (previous.parts[i] !== part) result.add(i);
+            });
+            return result;
+        }
+
+        // ============================================================
+        // 5. TEKENEN
+        // ============================================================
+
+        const measure = document.createElement("canvas").getContext("2d");
+
+        function render() {
+            const word = current();
+            const tiles = word.parts.map((part, i) => {
+                const classes = ["tile"];
+                if (blank) classes.push("blank");
+                else if (state.folded.has(i)) classes.push("folded");
+                if (state.active === i) classes.push("active");
+                if (state.changed.has(i) && !blank) classes.push("changed");
+                const label = blank
+                    ? `Vakje ${i + 1}`
+                    : `${state.folded.has(i) ? "Terugvouwen" : "Wegvouwen"}: ${part}`;
+                return `<button class="${classes.join(" ")}" data-tile="${i}" aria-label="${escapeHtml(label)}">
+                    <span class="ch">${escapeHtml(part)}</span>
+                    ${blank && state.marks.has(i) ? `<span class="mark">×</span>` : ""}
+                </button>`;
+            }).join("");
+
+            app.innerHTML = `
+                <div class="stage">
+                    ${picture ? `<img class="picture" id="picture" alt="" hidden>` : ""}
+                    <div class="group" id="group">
+                        ${showWord && !blank ? `<div class="wordline" style="align-self:center">${escapeHtml(word.text)}</div>` : ""}
+                        <div class="strip" id="strip">${tiles}</div>
+                        <div class="direction" aria-hidden="true">
+                            <svg viewBox="0 0 100 10" preserveAspectRatio="none"><path d="M1 5H97M92 1.5L98 5L92 8.5" fill="none" stroke="currentColor" stroke-width="1.4" vector-effect="non-scaling-stroke" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                            <span class="pointer" id="pointer"></span>
+                        </div>
+                    </div>
+                </div>
+                <div class="bar">
+                    ${words.length > 1 ? `
+                        <button class="ctrl" data-action="prev" aria-label="Vorig woord" ${state.index > 0 ? "" : "hidden"}>${icon("prev")}</button>
+                        <span class="count">${state.index + 1} / ${words.length}</span>
+                        <button class="ctrl" data-action="next" aria-label="Volgend woord" ${state.index < words.length - 1 ? "" : "hidden"}>${icon("next")}</button>
+                        <span class="sep"></span>` : ""}
+                    ${sound && !blank ? `
+                        <button class="pill ${state.busy === "zoem" ? "busy" : ""}" data-action="zoem" title="Zoem (Z)">${icon("zoem")}<span class="txt">Zoem</span></button>
+                        <button class="pill ${state.busy === "hak" ? "busy" : ""}" data-action="hak" title="Hak (H)">${icon("hak")}<span class="txt">Hak</span></button>` : ""}
+                    ${sound ? `<button class="pill light ${state.busy === "woord" ? "busy" : ""}" data-action="woord" title="Woord (W)" aria-label="Woord beluisteren">${icon("speaker")}</button>` : ""}
+                    <button class="ctrl" data-action="reset" aria-label="Herstel (R)" title="Herstel (R)">${icon("restart")}</button>
+                    ${document.fullscreenEnabled ? `<button class="ctrl" data-action="fullscreen" aria-label="Volledig scherm">${icon("full")}</button>` : ""}
+                </div>`;
+
+            if (picture) loadPicture();
+            fit();
+            movePointer();
+        }
+
+        // Zo groot mogelijk, voor alle woorden van het rijtje even groot.
+        let fontSize = 120;
+        function fit() {
+            const stage = document.querySelector(".stage");
+            const group = document.getElementById("group");
+            if (!stage || !group) return;
+            measure.font = "400 100px Andika";
+            // Breedte van de strook bij 100px: letters + opvulling + randen.
+            let widest = 0;
+            words.forEach((word) => {
+                const width = word.parts.reduce((sum, part) => {
+                    if (blank) return sum + 125 + 3;
+                    const text = Math.max(measure.measureText(part).width, 95);
+                    return sum + text + 44 + 3;
+                }, 6);
+                widest = Math.max(widest, width);
+            });
+            const pictureNode = document.getElementById("picture");
+            const pictureHeight = pictureNode && !pictureNode.hidden ? pictureNode.getBoundingClientRect().height + 16 : 0;
+            const width = stage.clientWidth - 32;
+            // strook ~1.32em, pijl 0.32em, woordbeeld ~1.35em
+            const lines = 1.32 + 0.45 + (showWord && !blank ? 1.45 : 0);
+            const height = stage.clientHeight - 32 - pictureHeight;
+            const byWidth = (width / widest) * 100;
+            const byHeight = height / lines;
+            fontSize = Math.max(28, Math.min(byWidth, byHeight, 260));
+            group.style.fontSize = `${fontSize}px`;
+        }
+
+        function loadPicture() {
+            const node = document.getElementById("picture");
+            if (!node) return;
+            const names = /^https?:\/\//.test(picture)
+                ? [picture]
+                : IMAGE_FOLDERS.flatMap((folder) => (/\.\w{3,4}$/.test(picture)
+                    ? [`${folder}${picture}`]
+                    : ["webp", "jpg", "png", "jpeg"].map((ext) => `${folder}${picture}.${ext}`)));
+            let attempt = 0;
+            const tryNext = () => {
+                if (attempt >= names.length) return;
+                node.src = names[attempt];
+                attempt += 1;
+            };
+            node.onerror = tryNext;
+            node.onload = () => {
+                node.hidden = false;
+                fit();
+                movePointer();
+            };
+            tryNext();
+        }
+
+        function movePointer() {
+            const pointer = document.getElementById("pointer");
+            const strip = document.getElementById("strip");
+            if (!pointer || !strip) return;
+            if (state.active < 0) {
+                pointer.classList.remove("on");
+                return;
+            }
+            const tile = strip.children[state.active];
+            if (!tile) return;
+            const stripBox = strip.getBoundingClientRect();
+            const box = tile.getBoundingClientRect();
+            pointer.style.left = `${box.left - stripBox.left + box.width / 2}px`;
+            pointer.classList.add("on");
+        }
+
+        // Alleen de klassen aanpassen tijdens zoemen of hakken (geen
+        // volledige hertekening, zodat de wijzer vloeiend beweegt).
+        function setActive(index) {
+            state.active = index;
+            const strip = document.getElementById("strip");
+            if (!strip) return;
+            [...strip.children].forEach((tile, i) => tile.classList.toggle("active", i === index));
+            movePointer();
+        }
+
+        function setBusy(name) {
+            state.busy = name;
+            document.querySelectorAll("[data-action=zoem], [data-action=hak], [data-action=woord]")
+                .forEach((button) => button.classList.toggle("busy", button.dataset.action === name));
+        }
+
+        // ============================================================
+        // 6. ZOEMEN, HAKKEN, WOORD
+        // ============================================================
+
+        function visibleIndexes() {
+            return current().parts.map((part, i) => i).filter((i) => !state.folded.has(i));
+        }
+
+        async function sequence(name, gap) {
+            if (state.busy === name) {
+                stopAll();
+                return;
+            }
+            stopAll();
+            const run = state.run;
+            setBusy(name);
+            const word = current();
+            const order = visibleIndexes();
+            for (const i of order) {
+                if (run !== state.run) return;
+                setActive(i);
+                // eslint-disable-next-line no-await-in-loop
+                await playFirst(soundUrls(word.parts[i]), true, word.parts[i]);
+                if (run !== state.run) return;
+                // eslint-disable-next-line no-await-in-loop
+                await wait(gap);
+            }
+            if (run !== state.run) return;
+            await wait(name === "hak" ? 250 : 150);
+            setActive(-1);
+            setBusy("");
+        }
+
+        async function playWord() {
+            if (state.busy === "woord") {
+                stopAll();
+                return;
+            }
+            stopAll();
+            const run = state.run;
+            setBusy("woord");
+            const word = current();
+            // Met weggevouwen letters: alleen wat overblijft.
+            const shown = visibleIndexes().map((i) => word.parts[i]).join("");
+            if (shown === word.text) await playFirst(wordUrls(word.text), false, word.text);
+            else await playFirst(wordUrls(shown), false, shown);
+            if (run !== state.run) return;
+            setBusy("");
+        }
+
+        function stopAll() {
+            state.run += 1;
+            stopAudio();
+            setActive(-1);
+            setBusy("");
+        }
+
+        // ============================================================
+        // 7. BEDIENING
+        // ============================================================
+
+        function toggleTile(i) {
+            if (i < 0 || i >= current().parts.length) return;
+            stopAll();
+            if (blank) {
+                if (state.marks.has(i)) state.marks.delete(i);
+                else state.marks.add(i);
+            } else if (state.folded.has(i)) {
+                state.folded.delete(i);
+            } else {
+                state.folded.add(i);
+            }
+            state.changed.clear();
+            render();
+        }
+
+        let changedTimer = null;
+        function go(index) {
+            if (index < 0 || index >= words.length || index === state.index) return;
+            stopAll();
+            const previous = current();
+            state.index = index;
+            state.folded = new Set();
+            state.marks = new Set();
+            state.changed = diff(previous, current());
+            render();
+            preload(current());
+            // De nieuwe letter blijft even roze, zoals de lesgever ze
+            // apart benoemt voor ze aan het woord toe te voegen.
+            clearTimeout(changedTimer);
+            changedTimer = setTimeout(() => {
+                state.changed.clear();
+                document.querySelectorAll(".tile.changed").forEach((tile) => tile.classList.remove("changed"));
+            }, 2600);
+        }
+
+        function reset() {
+            stopAll();
+            state.folded = new Set();
+            state.marks = new Set();
+            state.changed.clear();
+            render();
+        }
+
+        function fullscreen() {
+            if (document.fullscreenElement) document.exitFullscreen();
+            else document.documentElement.requestFullscreen().catch(() => {});
+        }
+
+        app.addEventListener("click", (event) => {
+            const tile = event.target.closest("[data-tile]");
+            if (tile) {
+                toggleTile(Number(tile.dataset.tile));
+                return;
+            }
+            const target = event.target.closest("[data-action]");
+            if (!target) return;
+            const action = target.dataset.action;
+            if (action === "zoem") sequence("zoem", ZOEM_GAP_MS);
+            else if (action === "hak") sequence("hak", HAK_GAP_MS);
+            else if (action === "woord") playWord();
+            else if (action === "reset") reset();
+            else if (action === "next") go(state.index + 1);
+            else if (action === "prev") go(state.index - 1);
+            else if (action === "fullscreen") fullscreen();
+        });
+
+        document.addEventListener("keydown", (event) => {
+            if (event.altKey || event.ctrlKey || event.metaKey) return;
+            const key = event.key.toLowerCase();
+            if (key === "arrowright" || key === " " || key === "pagedown") {
+                event.preventDefault();
+                go(state.index + 1);
+            } else if (key === "arrowleft" || key === "pageup") {
+                event.preventDefault();
+                go(state.index - 1);
+            } else if (key === "z" && sound && !blank) sequence("zoem", ZOEM_GAP_MS);
+            else if (key === "h" && sound && !blank) sequence("hak", HAK_GAP_MS);
+            else if (key === "w" && sound) playWord();
+            else if (key === "r") reset();
+            else if (key === "f") fullscreen();
+            else if (/^[1-9]$/.test(key)) toggleTile(Number(key) - 1);
+        });
+
+        window.addEventListener("resize", () => {
+            fit();
+            movePointer();
+        });
+        document.addEventListener("fullscreenchange", () => setTimeout(() => {
+            fit();
+            movePointer();
+        }, 60));
+
+        Promise.all([document.fonts.load("400 100px Andika").catch(() => {}), document.fonts.ready]).then(() => {
+            render();
+            preload(current());
+        });
+    })();
+    </script>
+</body>
+</html>
